@@ -1,0 +1,10 @@
+# Packaged releases produced by `kpackagetool6 --package` or tar
+*.plasmoid
+*.tar.gz
+*.zip
+
+# Editor / OS noise
+.directory
+*~
+*.swp
+.DS_Store

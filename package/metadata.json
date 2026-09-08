@@ -1,0 +1,21 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "postadelmaga",
+                "Email": "postadelmaga@gmail.com"
+            }
+        ],
+        "Description": "Always-fresh James Webb Space Telescope imagery from NASA, ESA/Webb, Flickr and MAST",
+        "Description[it]": "Immagini sempre fresche del telescopio spaziale James Webb da NASA, ESA/Webb, Flickr e MAST",
+        "EnabledByDefault": true,
+        "Icon": "kstars_stars",
+        "Id": "org.kde.webbscreen",
+        "License": "GPL-3.0-or-later",
+        "Name": "Webb Screen",
+        "Name[it]": "Webb Screen",
+        "Version": "1.0.0",
+        "Website": "https://github.com/postadelmaga/WebbScreen"
+    }
+}

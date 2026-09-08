@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+      http://www.kde.org/standards/kcfg/1.0/kcfg.xsd" >
+  <kcfgfile name=""/>
+
+  <group name="General">
+
+    <!-- Sources -->
+    <entry name="SourceNasaScience" type="Bool">
+      <label>Use the Webb release stream on science.nasa.gov (STScI)</label>
+      <default>true</default>
+    </entry>
+    <entry name="SourceNasa" type="Bool">
+      <label>Use the NASA Image and Video Library</label>
+      <default>true</default>
+    </entry>
+    <entry name="SourceEsa" type="Bool">
+      <label>Use the ESA/Webb image feed</label>
+      <default>true</default>
+    </entry>
+    <entry name="SourceFlickr" type="Bool">
+      <label>Use NASA's James Webb Space Telescope Flickr account</label>
+      <default>true</default>
+    </entry>
+    <entry name="SourceJwstApi" type="Bool">
+      <label>Use jwstapi.com (MAST); requires an API key</label>
+      <default>false</default>
+    </entry>
+    <entry name="FlickrApiKey" type="String">
+      <label>Optional Flickr API key, unlocks original-resolution downloads</label>
+      <default></default>
+    </entry>
+    <entry name="JwstApiKey" type="String">
+      <label>API key for jwstapi.com</label>
+      <default></default>
+    </entry>
+
+    <!-- Update policy -->
+    <entry name="UpdateMode" type="Int">
+      <label>0 - rotate on a timer, 1 - only when a new image is published, 2 - manual only</label>
+      <default>0</default>
+    </entry>
+    <entry name="UpdateIntervalSeconds" type="Int">
+      <label>Seconds between wallpaper changes in timer mode</label>
+      <default>21600</default>
+    </entry>
+    <entry name="CheckIntervalMinutes" type="Int">
+      <label>Minutes between checks for newly published images</label>
+      <default>60</default>
+    </entry>
+    <entry name="SwitchOnNewImage" type="Bool">
+      <label>Switch immediately when a source publishes a new image</label>
+      <default>true</default>
+    </entry>
+    <entry name="Selection" type="Int">
+      <label>0 - newest unseen first, 1 - random, 2 - strictly newest</label>
+      <default>0</default>
+    </entry>
+
+    <!-- Downloads -->
+    <entry name="MaxDownloadMegabytes" type="Int">
+      <label>Largest image variant to download, in megabytes</label>
+      <default>25</default>
+    </entry>
+    <entry name="PhotographsOnly" type="Bool">
+      <label>Skip artist concepts, diagrams and spectra</label>
+      <default>true</default>
+    </entry>
+    <entry name="SkipLowResolution" type="Bool">
+      <label>Only use image variants at least as wide as the screen</label>
+      <default>true</default>
+    </entry>
+    <entry name="CachedImageCount" type="Int">
+      <label>How many downloaded images to keep on disk</label>
+      <default>20</default>
+    </entry>
+
+    <!-- Presentation -->
+    <entry name="FillMode" type="Int">
+      <label>Sizing, cropping and positioning of the wallpaper image</label>
+      <default>2</default>
+    </entry>
+    <entry name="Color" type="Color">
+      <label>Color of the wallpaper</label>
+      <default>#000000</default>
+    </entry>
+    <entry name="Blur" type="Bool">
+      <label>Blur a copy of the image to fill the empty areas</label>
+      <default>false</default>
+    </entry>
+    <entry name="ShowInfoOverlay" type="Bool">
+      <label>Show the image title and credit on the desktop</label>
+      <default>true</default>
+    </entry>
+    <entry name="ShowInfoDescription" type="Bool">
+      <label>Include a short description of the subject in the caption</label>
+      <default>true</default>
+    </entry>
+    <entry name="InfoOverlayCorner" type="Int">
+      <label>0 - bottom left, 1 - bottom right, 2 - top left, 3 - top right</label>
+      <default>1</default>
+    </entry>
+
+    <!-- Runtime state, written by the wallpaper itself -->
+    <entry name="CurrentImagePath" type="String">
+      <label>Local path of the wallpaper currently shown</label>
+      <default></default>
+    </entry>
+    <entry name="CurrentId" type="String">
+      <label>Identifier of the wallpaper currently shown</label>
+      <default></default>
+    </entry>
+    <entry name="CurrentTitle" type="String">
+      <label>Title of the wallpaper currently shown</label>
+      <default></default>
+    </entry>
+    <entry name="CurrentDescription" type="String">
+      <label>Short description of the wallpaper currently shown</label>
+      <default></default>
+    </entry>
+    <entry name="CurrentCredit" type="String">
+      <label>Credit line of the wallpaper currently shown</label>
+      <default></default>
+    </entry>
+    <entry name="CurrentSourceName" type="String">
+      <label>Human readable source of the wallpaper currently shown</label>
+      <default></default>
+    </entry>
+    <entry name="CurrentInfoUrl" type="String">
+      <label>Web page describing the wallpaper currently shown</label>
+      <default></default>
+    </entry>
+    <entry name="History" type="String">
+      <label>Recently shown images as JSON, oldest first</label>
+      <default></default>
+    </entry>
+    <entry name="HistoryIndex" type="Int">
+      <label>Position of the current image within History, -1 when empty</label>
+      <default>-1</default>
+    </entry>
+    <entry name="SeenIds" type="StringList">
+      <label>Identifiers already shown, most recent last</label>
+      <default></default>
+    </entry>
+    <entry name="LastUpdateTime" type="String">
+      <label>ISO timestamp of the last successful wallpaper change</label>
+      <default></default>
+    </entry>
+    <entry name="LastKnownNewestId" type="String">
+      <label>Newest identifier seen during the last check</label>
+      <default></default>
+    </entry>
+
+  </group>
+</kcfg>
