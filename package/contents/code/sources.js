@@ -23,17 +23,17 @@
 var UA = "Mozilla/5.0 (X11; Linux x86_64) WebbScreen/1.0 (KDE Plasma wallpaper)";
 
 var FLICKR_NSID = "50785054@N03"; // NASA's James Webb Space Telescope
-// Flickr's size suffixes have fixed long-edge widths, so a variant can be ruled
-// out as too small before it is ever requested.
+// The size suffixes reachable from the public feed, with their fixed long-edge
+// widths, so a variant can be ruled out as too small before it is ever
+// requested. The list stops at "_b" (1024 px) because that is where the feed
+// stops: it hands out the small "_m" URL, the suffixes up to "_b" resolve
+// against that same secret, and every larger one — "_h", "_k", "_3k", "_4k" … —
+// is served under a different secret and answers 410 Gone for every photo in
+// the stream. Those sizes exist only with an API key; see FLICKR_EXTRAS.
 var FLICKR_SIZES = [
-    { suffix: "_6k", width: 6144 },
-    { suffix: "_5k", width: 5120 },
-    { suffix: "_4k", width: 4096 },
-    { suffix: "_3k", width: 3072 },
-    { suffix: "_k", width: 2048 },
-    { suffix: "_h", width: 1600 },
     { suffix: "_b", width: 1024 },
-    { suffix: "_c", width: 800 }
+    { suffix: "_c", width: 800 },
+    { suffix: "_z", width: 640 }
 ];
 var FLICKR_EXTRAS = [
     { key: "url_o", width: Infinity },
@@ -438,9 +438,11 @@ function flickr(cfg, done) {
     }
 }
 
-// Keyless: the public photostream feed. Only exposes the small ("_m") URL, but
-// the other size suffixes share the same secret, so the probe step in main.qml
-// finds the biggest one that actually exists.
+// Keyless: the public photostream feed, which tops out at 1024 px — see
+// FLICKR_SIZES. Offering the larger suffixes anyway, as this used to, fills the
+// pool with entries whose every variant 410s; because they are the newest
+// images they sit at the head of the queue, where they burn through the attempt
+// budget in main.qml before a usable picture is ever reached.
 function flickrPublicFeed(minWidth, done) {
     const url = "https://api.flickr.com/services/feeds/photos_public.gne?id="
         + FLICKR_NSID + "&format=json&nojsoncallback=1";

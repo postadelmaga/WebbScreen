@@ -97,8 +97,15 @@ showing a *new* image does, browser style.
 Each source offers the same picture in several sizes. Before downloading, the
 plugin issues `HEAD` requests down the candidate list, biggest first, and takes
 the first variant that fits the configured budget (25 MB by default — enough
-for the full-resolution ESA/Webb releases, which run around 4000×4000).
-*Skip small press thumbnails* additionally rejects anything under 300 KB.
+for the full-resolution ESA/Webb releases, which run around 4000×4000). A
+fixed 20 KB floor rejects error pages served with a 200.
+
+*Only use images at least as wide as the screen* (on by default) applies a
+second floor, this one on the pixel width, before anything is requested: a
+variant narrower than the screen is dropped, and a picture with nothing bigger
+on offer is skipped entirely. It bites hardest on Flickr without an API key,
+whose public feed tops out at 1024 px — with the option on, that source
+contributes nothing on any screen wider than that.
 
 science.nasa.gov renders its images on the fly and answers neither
 `Content-Length` nor range requests, so the size of a variant cannot be probed

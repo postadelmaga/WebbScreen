@@ -88,11 +88,17 @@ WallpaperItem {
 
     /// Variants narrower than the screen are not worth downloading; the floor is
     /// the widest screen this desktop spans, in physical pixels.
+    ///
+    /// Floored, never rounded: on a fractionally scaled output the logical size
+    /// times the scale factor lands just above the panel's real pixel count
+    /// (1746 x 1.1 = 1920.6 on a 1920 px screen), and rounding up would reject
+    /// the 1920-wide variant that matches the screen exactly — which is the one
+    /// width every source offers.
     function minWidth() {
         if (!root.configuration.SkipLowResolution) {
             return 0;
         }
-        return Math.round(Math.max(root.width, Screen.width) * Screen.devicePixelRatio);
+        return Math.floor(Math.max(root.width, Screen.width) * Screen.devicePixelRatio);
     }
 
     /// A sanity floor only: enough to reject error pages served with a 200.
@@ -216,6 +222,7 @@ WallpaperItem {
         const item = list[index];
         if (!item) {
             root.busy = false;
+            root.restartRotation();
             return;
         }
         if (!shell.isAvailable()) {
@@ -240,7 +247,12 @@ WallpaperItem {
                 if (next >= 0 && next < list.length) {
                     root.showHistoryAt(next, direction);
                 } else {
+                    // Nothing left in this direction. Clearing `busy` is not
+                    // enough: rotation is only ever rearmed by the code that
+                    // finishes a switch, so bailing out silently here would
+                    // leave the clock stopped for good.
                     root.busy = false;
+                    root.restartRotation();
                 }
             });
         });
@@ -333,7 +345,20 @@ WallpaperItem {
         const seen = root.configuration.SeenIds || [];
         let unseen = entries.filter(entry => seen.indexOf(entry.id) === -1);
         if (unseen.length === 0) {
-            unseen = entries.slice();
+            // Every image in the pool has been shown. Start a new cycle rather
+            // than handing back the whole pool newest-first: that list is the
+            // same on every tick, so the first downloadable entry in it would
+            // be picked again and again — and since recordHistory() refuses to
+            // append the image already at the end of the history, the wallpaper
+            // would sit on that one picture for good. Only what is on screen
+            // stays marked, which also guarantees the next pick is a different
+            // image.
+            const current = root.configuration.CurrentId;
+            root.configuration.SeenIds = current.length > 0 ? [current] : [];
+            unseen = entries.filter(entry => entry.id !== current);
+            if (unseen.length === 0) {
+                unseen = entries.slice();
+            }
         }
         if (root.configuration.Selection === 1) {
             for (let i = unseen.length - 1; i > 0; --i) {
@@ -640,7 +665,17 @@ WallpaperItem {
         id: checkTimer
         repeat: true
         triggeredOnStart: false
-        onTriggered: root.update(false)
+        onTriggered: {
+            // Belt and braces. Rotation is rearmed by whichever path finishes a
+            // switch, so any future path that returns early without doing so
+            // would stop the wallpaper for the rest of the session. This is the
+            // one clock that keeps running regardless, so it puts the other one
+            // back on its feet.
+            if (root.configuration.UpdateMode === 0 && !rotateTimer.running && !root.busy) {
+                root.restartRotation();
+            }
+            root.update(false);
+        }
     }
 
     /**
