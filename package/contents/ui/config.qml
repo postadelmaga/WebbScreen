@@ -54,10 +54,19 @@ Kirigami.FormLayout {
         Kirigami.FormData.label: i18nd(root.domain, "Image sources")
     }
 
-    QQC2.CheckBox {
-        id: nasaScienceCheck
+    RowLayout {
         Kirigami.FormData.label: i18nd(root.domain, "Use:")
-        text: i18nd(root.domain, "NASA Science — Webb releases (webbtelescope.org)")
+        spacing: Kirigami.Units.smallSpacing
+
+        QQC2.CheckBox {
+            id: nasaScienceCheck
+            text: i18nd(root.domain, "NASA Science — Webb releases (science.nasa.gov)")
+        }
+
+        Kirigami.ContextualHelpButton {
+            toolTipText: i18nd(root.domain,
+                "STScI's webbtelescope.org has been retired and now redirects here; this is where the Webb release stream ended up, and it carries the images at up to their native resolution.")
+        }
     }
 
     RowLayout {
@@ -102,7 +111,7 @@ Kirigami.FormLayout {
 
         Kirigami.ContextualHelpButton {
             toolTipText: i18nd(root.domain,
-                "Without a key, Flickr images are limited to the sizes exposed by the public photostream feed. A free key from flickr.com/services/apps/create unlocks original-resolution downloads.")
+                "Without a key, Flickr is limited to what the public photostream feed serves, which tops out at 1024 px — so with the screen-width floor above switched on, that source contributes nothing at all. A free key from flickr.com/services/apps/create unlocks original-resolution downloads.")
         }
     }
 
