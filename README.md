@@ -6,6 +6,9 @@ imagery from the James Webb Space Telescope.
 [![License: GPL v3+](https://img.shields.io/badge/License-GPLv3+-blue.svg)](LICENSE)
 ![Plasma 6](https://img.shields.io/badge/KDE-Plasma%206-1d99f3)
 ![Pure QML](https://img.shields.io/badge/QML-no%20compilation-brightgreen)
+[![openDesktop](https://img.shields.io/badge/openDesktop-Webb%20Screen-f7941d)](https://www.opendesktop.org/p/2370853/)
+
+![The wallpaper mid-rotation, with the caption card and the settings page open](screenshots/desktop.png)
 
 New Webb releases from ESA/Webb, NASA Science, Flickr and MAST are merged into
 one stream, deduplicated and sorted newest first. The plugin picks a picture,
@@ -20,6 +23,13 @@ and cache housekeeping run through `curl` on Plasma's `executable` data engine.
 - `curl` and coreutils — used at runtime for downloads and cache pruning
 
 ## Install
+
+From within Plasma: *Configure Desktop and Wallpaper* → **Get New Plugins…** →
+search for *Webb Screen*. It is published on
+[openDesktop](https://www.opendesktop.org/p/2370853/), which is the same
+catalogue that button reads from.
+
+From source:
 
 ```sh
 git clone https://github.com/postadelmaga/WebbScreen.git
