@@ -12,25 +12,13 @@
       <label>Use the Webb release stream on science.nasa.gov (STScI)</label>
       <default>true</default>
     </entry>
-    <entry name="SourceNasa" type="Bool">
-      <label>Use the NASA Image and Video Library</label>
-      <default>true</default>
-    </entry>
     <entry name="SourceEsa" type="Bool">
       <label>Use the ESA/Webb image feed</label>
-      <default>true</default>
-    </entry>
-    <entry name="SourceFlickr" type="Bool">
-      <label>Use NASA's James Webb Space Telescope Flickr account</label>
       <default>true</default>
     </entry>
     <entry name="SourceJwstApi" type="Bool">
       <label>Use jwstapi.com (MAST); requires an API key</label>
       <default>false</default>
-    </entry>
-    <entry name="FlickrApiKey" type="String">
-      <label>Optional Flickr API key, unlocks original-resolution downloads</label>
-      <default></default>
     </entry>
     <entry name="JwstApiKey" type="String">
       <label>API key for jwstapi.com</label>
@@ -51,7 +39,7 @@
       <default>60</default>
     </entry>
     <entry name="SwitchOnNewImage" type="Bool">
-      <label>Switch immediately when a source publishes a new image</label>
+      <label>In timer mode, switch immediately when a source publishes a new image</label>
       <default>true</default>
     </entry>
     <entry name="Selection" type="Int">
@@ -68,8 +56,12 @@
       <label>Skip artist concepts, diagrams and spectra</label>
       <default>true</default>
     </entry>
+    <entry name="MatchScreenResolution" type="Bool">
+      <label>Download the smallest variant that still covers the screen instead of the largest that fits the budget</label>
+      <default>false</default>
+    </entry>
     <entry name="SkipLowResolution" type="Bool">
-      <label>Only use image variants at least as wide as the screen</label>
+      <label>Only use images large enough for the screen in the chosen fill mode</label>
       <default>true</default>
     </entry>
     <entry name="CachedImageCount" type="Int">
@@ -148,8 +140,8 @@
       <label>ISO timestamp of the last successful wallpaper change</label>
       <default></default>
     </entry>
-    <entry name="LastKnownNewestId" type="String">
-      <label>Newest identifier seen during the last check</label>
+    <entry name="LastKnownNewestTime" type="String">
+      <label>ISO timestamp of the newest release seen so far</label>
       <default></default>
     </entry>
 

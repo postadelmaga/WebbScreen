@@ -10,8 +10,8 @@ imagery from the James Webb Space Telescope.
 
 ![The wallpaper mid-rotation, with the caption card and the settings page open](screenshots/desktop.png)
 
-New Webb releases from ESA/Webb, NASA Science, Flickr and MAST are merged into
-one stream, deduplicated and sorted newest first. The plugin picks a picture,
+New Webb releases from NASA Science and ESA/Webb (and, optionally, MAST) are
+merged into one stream, deduplicated and sorted newest first. The plugin picks a picture,
 downloads the largest variant that fits your download budget, and optionally
 names it in a small card on the desktop. Nothing to compile — image downloads
 and cache housekeeping run through `curl` on Plasma's `executable` data engine.
@@ -52,14 +52,20 @@ a `git pull` is enough. To remove the plugin and its image cache:
 
 | Source | API key | Notes |
 | --- | --- | --- |
-| **ESA/Webb** (`esawebb.org`) | no | RSS image feed; the CDN serves `large` (full-resolution), `wallpaper5`, `wallpaper4` and `screen` variants. **The best source** — this is where the science releases land first. |
-| **NASA Science — Webb** (`science.nasa.gov`) | no | `webbtelescope.org` (STScI) has been retired and now redirects here; its release stream lives on as a WordPress REST collection. Roughly 80 recent Webb releases, at up to native resolution. **The other best source.** |
-| **Flickr — NASA's James Webb Space Telescope** (`50785054@N03`) | optional | Without a key the public photostream feed is used, which caps most photos at 1024 px. A free key from <https://www.flickr.com/services/apps/create> switches to `flickr.people.getPublicPhotos` with `url_o`/`url_6k`… and unlocks original resolution. |
-| **NASA Image and Video Library** (`images-api.nasa.gov`) | no | The archive is agency-wide, so a plain "James Webb Space Telescope" query returns mostly clean-room and press-event photography. Two queries are merged instead — everything filed under the STScI centres, plus a broad query filtered down to astronomical subjects. In practice this yields only a handful of images (the July 2022 first-release set); NASA simply does not index the later science releases here. |
+| **NASA Science — Webb** (`science.nasa.gov`) | no | `webbtelescope.org` (STScI) has been retired and now redirects here. Read through the WordPress REST API as *science assets*: one record per picture rather than per press release, each titled for what it shows, classified (photograph, artist concept, infographic, spectrum, video…) and listing its native size. The 100 most recent Webb stills, at up to native resolution. **The main source.** |
+| **ESA/Webb** (`esawebb.org`) | no | RSS image feed (the last 25 images); the CDN serves `large` (full-resolution), `wallpaper5`, `wallpaper4` and `screen` variants. Carries the same joint releases as NASA, plus ESA's own *Picture of the Month*, which appears nowhere else. |
 | **jwstapi.com** (MAST) | required | Community index of processed JWST products. Off by default: it needs a key, and it returns raw instrument previews rather than press-ready pictures. |
 
 Each source can be switched on or off independently in the wallpaper settings.
-All enabled sources are merged, deduplicated and sorted newest first.
+All enabled sources are merged and sorted newest first. A joint release goes out
+from ESA and NASA at once under the same title, so the same picture is
+recognised by its title and day and kept once — the NASA copy, which states its
+size and can be rendered at exactly the width the screen needs.
+
+Two earlier sources have been dropped. The NASA Image and Video Library indexes only
+the July 2022 first-release set and nothing since. Flickr's keyless public feed
+stops at 1024 px, so with the screen-width floor on it contributed nothing; with
+a key it mirrored the NASA releases already fetched in full.
 
 ## Update policy
 
@@ -68,7 +74,7 @@ Three modes, chosen in the wallpaper settings:
 - **Rotate on a schedule** — a new picture every 5 seconds … 1 week. The very
   short intervals are there for trying the plugin out.
 - **Only when a new image is published** — the wallpaper stays put until a
-  source publishes something new.
+  source publishes something new, then switches to it.
 - **Manually** — only via *Next Webb Image* in the desktop context menu.
 
 Rotating and polling are two independent clocks. Rotation moves through the
@@ -77,9 +83,13 @@ interval costs one download per change and never re-queries the APIs. The
 sources are polled separately, on the *Check for new images every* interval,
 and a switch only happens when one is actually due.
 
-Independently of the mode, *Switch as soon as a source publishes a new image*
-makes a fresh release take over immediately. You can also advance by hand at
-any time from the desktop context menu.
+In schedule mode, *Switch as soon as a source publishes a new image* makes a
+fresh release take over immediately instead of waiting its turn. You can also
+advance by hand at any time from the desktop context menu.
+
+A release counts as new when it is dated after the newest one seen so far.
+When several pictures land at once — a release usually brings a NIRCam and a
+MIRI view — the newest is shown and the rest come up next in the rotation.
 
 Which picture gets chosen is configurable too: the most recent one not shown
 yet, a random one, or always the most recent.
@@ -87,13 +97,20 @@ yet, a random one, or always the most recent.
 ## What counts as an image
 
 *Only real photographs* (on by default) leaves out artist concepts,
-illustrations, infographics, diagrams, spectra and images with annotations
-drawn on them. The sources name these plainly and consistently in the title —
-`(artist's concept)`, `transmission spectrum`, `(annotated NIRCam image)` — so
-that is what the filter matches on, plus the unambiguous phrases in the caption.
-There is no structured field to use instead: the ESA feed carries no category,
-and the `Artist Concept` term on science.nasa.gov sits on a post type whose REST
-endpoint returns an empty body.
+illustrations, infographics, diagrams, spectra, compass and annotated versions,
+side-by-side comparisons, and the occasional press photo of the observatory
+itself.
+
+science.nasa.gov classifies every picture, so for that source the request
+itself asks for photographs only. ESA does not, but both sources name the
+medium plainly and consistently in the title — `(artist's concept)`,
+`transmission spectrum`, `(NIRCam Compass Image)` — so titles are matched too,
+along with the unambiguous phrases in the caption ("An illustration of…").
+
+Joint releases also file the other observatories' frames next to Webb's: the
+Hubble view of the Cat's Head Nebula sits in the Webb stream beside the NIRCam
+and MIRI ones. A picture whose title or instrument names Hubble, Chandra or
+Spitzer and not Webb is left out whatever this setting says.
 
 ## History
 
@@ -110,23 +127,44 @@ the first variant that fits the configured budget (25 MB by default — enough
 for the full-resolution ESA/Webb releases, which run around 4000×4000). A
 fixed 20 KB floor rejects error pages served with a 200.
 
-*Only use images at least as wide as the screen* (on by default) applies a
-second floor, this one on the pixel width, before anything is requested: a
-variant narrower than the screen is dropped, and a picture with nothing bigger
-on offer is skipped entirely. It bites hardest on Flickr without an API key,
-whose public feed tops out at 1024 px — with the option on, that source
-contributes nothing on any screen wider than that.
+*Download no more than the screen can show* (off by default) starts that list
+at the smallest variant that is still large enough for the screen instead. The
+wallpaper is drawn at screen resolution either way — the `Image` decodes no
+more than that — so it looks the same, but on a 1920-wide screen a typical NASA
+Science release is then 5 MB instead of 22 MB and takes a third of the CPU to
+decode. science.nasa.gov renders any width, so it is asked for exactly the one
+the screen needs. ESA's own variants are not reordered: its wallpaper sizes are
+fixed crops, enlarged by ESA when the original is smaller than they are, so
+they are only used once the original has proved too big for the budget. Leave
+the option off if you keep what *Save a Copy to Pictures* hands you: that is
+the file that was fetched.
+
+*Only use images at least as large as the screen* (on by default) keeps every
+picture from being enlarged on screen. What "large enough" means depends on the
+positioning: *Scaled and cropped* and *Scaled* cover the whole screen, so the
+picture must be both as wide and as tall as the screen in physical pixels (a
+1746×982 desktop at 110 % is 1920×1080); the other modes fit it inside, where
+reaching either edge is enough. It is applied twice. Before anything is
+requested, a variant whose stated size falls short is dropped. After the
+download the file itself is measured with `file`, which catches the pictures
+whose size no source states (ESA's originals): one that falls short is deleted
+and the next picture is tried. A cached copy that has become too small — a
+bigger screen, a mode that needs more — is replaced the same way.
 
 science.nasa.gov renders its images on the fly and answers neither
 `Content-Length` nor range requests, so the size of a variant cannot be probed
-there. Its rendition widths are estimated from the pixel count instead
-(PNG ≈ 1.6 bytes/pixel), such a variant is only picked once every measurable
-one has been rejected, and the real size is re-checked after the download — a
+there. Its rendition widths are estimated from the native size the asset lists
+(PNG ≈ 1.6 bytes/pixel), and the real size is re-checked after the download — a
 variant that blew the budget is deleted and the next smaller one is tried.
 
 Images are cached in `~/.cache/webbscreen/`; the *Keep on disk* setting bounds
 how many are retained (20 by default, oldest pruned first). Rotating back onto
-an image still on disk costs nothing — the download is skipped.
+an image still on disk costs nothing: the cache is checked in the same shell
+that would have run the `HEAD` probes, so a switch onto a cached picture makes
+no network requests at all. A cache entry is per image, not per variant: a copy
+still large enough for the screen is kept even after raising the budget or
+turning the screen-resolution option off — *Empty Cache* in the settings if you
+want those re-fetched larger.
 
 ## Caption
 
@@ -153,7 +191,7 @@ Right-click the desktop:
 package/
 ├── metadata.json                 KPackage manifest (Plasma/Wallpaper)
 └── contents/
-    ├── code/sources.js           the five providers + merge/sort/dedupe
+    ├── code/sources.js           the providers + filter/merge/sort/dedupe
     ├── code/commands.js          the shell commands (probe, download, prune)
     ├── config/main.xml           KConfigXT settings and persisted state
     └── ui/

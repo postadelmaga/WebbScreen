@@ -60,14 +60,8 @@ WallpaperItem {
         if (root.configuration.SourceNasaScience) {
             enabled.push("nasascience");
         }
-        if (root.configuration.SourceNasa) {
-            enabled.push("nasa");
-        }
         if (root.configuration.SourceEsa) {
             enabled.push("esa");
-        }
-        if (root.configuration.SourceFlickr) {
-            enabled.push("flickr");
         }
         if (root.configuration.SourceJwstApi) {
             enabled.push("jwstapi");
@@ -75,9 +69,12 @@ WallpaperItem {
         return {
             enabledSources: enabled,
             maxBytes: root.maxBytes(),
-            minWidth: root.minWidth(),
+            skipLowResolution: root.configuration.SkipLowResolution,
+            targetWidth: root.targetWidth(),
+            targetHeight: root.targetHeight(),
+            fillsScreen: root.fillsScreen(),
+            matchScreen: root.configuration.MatchScreenResolution,
             photographsOnly: root.configuration.PhotographsOnly,
-            flickrApiKey: root.configuration.FlickrApiKey,
             jwstApiKey: root.configuration.JwstApiKey
         };
     }
@@ -86,19 +83,46 @@ WallpaperItem {
         return Math.max(1, root.configuration.MaxDownloadMegabytes) * 1024 * 1024;
     }
 
-    /// Variants narrower than the screen are not worth downloading; the floor is
-    /// the widest screen this desktop spans, in physical pixels.
+    /**
+     * The smallest image worth putting on this screen, for the size check run
+     * on the downloaded file; null when SkipLowResolution is off. Mirrors what
+     * sourceConfig() hands the sources for the variants they offer.
+     */
+    function sizeFloor() {
+        if (!root.configuration.SkipLowResolution) {
+            return null;
+        }
+        return {
+            width: root.targetWidth(),
+            height: root.targetHeight(),
+            fillsScreen: root.fillsScreen()
+        };
+    }
+
+    /// Cropping and stretching cover the whole screen, so the picture has to
+    /// be both wide and tall enough; the other modes fit it inside, where
+    /// reaching either edge is enough.
+    function fillsScreen() {
+        return root.imageFillMode === Image.PreserveAspectCrop
+            || root.imageFillMode === Image.Stretch;
+    }
+
+    /// The screen in physical pixels: the widest and the tallest this desktop
+    /// spans. It is the floor under which a variant is too small to bother
+    /// with, and — when MatchScreenResolution is on — also the ceiling, since
+    /// the Image decodes no more than this anyway.
     ///
     /// Floored, never rounded: on a fractionally scaled output the logical size
     /// times the scale factor lands just above the panel's real pixel count
     /// (1746 x 1.1 = 1920.6 on a 1920 px screen), and rounding up would reject
     /// the 1920-wide variant that matches the screen exactly — which is the one
     /// width every source offers.
-    function minWidth() {
-        if (!root.configuration.SkipLowResolution) {
-            return 0;
-        }
+    function targetWidth() {
         return Math.floor(Math.max(root.width, Screen.width) * Screen.devicePixelRatio);
+    }
+
+    function targetHeight() {
+        return Math.floor(Math.max(root.height, Screen.height) * Screen.devicePixelRatio);
     }
 
     /// A sanity floor only: enough to reject error pages served with a 200.
@@ -106,12 +130,14 @@ WallpaperItem {
         return 20 * 1024;
     }
 
-    function intervalElapsed() {
+    /// True when the last switch is at least `ms` old (the rotation interval
+    /// by default), or when there has never been one.
+    function intervalElapsed(ms) {
         const last = Date.parse(root.configuration.LastUpdateTime);
         if (isNaN(last)) {
             return true;
         }
-        return (Date.now() - last) >= root.rotateIntervalMs();
+        return (Date.now() - last) >= (ms === undefined ? root.rotateIntervalMs() : ms);
     }
 
     function rotateIntervalMs() {
@@ -282,7 +308,7 @@ WallpaperItem {
             return;
         }
         root.busy = true;
-        root.queue = root.orderPool(root.pool, false);
+        root.queue = root.orderPool(root.pool);
         root.attempt = 0;
         root.tryNextCandidate();
     }
@@ -316,12 +342,21 @@ WallpaperItem {
         root.pool = entries;
         root.poolFetchedAt = Date.now();
 
-        const newestId = entries[0].id;
-        const previousNewest = root.configuration.LastKnownNewestId;
-        const hasNewRelease = previousNewest.length > 0 && newestId !== previousNewest;
-        root.configuration.LastKnownNewestId = newestId;
+        // New means dated after the newest release seen so far. Comparing the
+        // head of the list instead would also fire whenever a source is down
+        // for one check and back for the next, and would switch to whatever
+        // happened to be first — possibly a picture already shown.
+        const known = Date.parse(root.configuration.LastKnownNewestTime);
+        const newest = entries[0].date; // entries come newest first
+        const fresh = isNaN(known) ? [] : entries.filter(entry => entry.date > known);
+        if (newest > 0 && (isNaN(known) || newest > known)) {
+            root.configuration.LastKnownNewestTime = new Date(newest).toISOString();
+        }
 
-        const switchToNew = hasNewRelease && root.configuration.SwitchOnNewImage;
+        // Waiting for new releases is the whole point of mode 1, so there it
+        // does not depend on the checkbox.
+        const switchToNew = fresh.length > 0
+            && (root.configuration.SwitchOnNewImage || root.configuration.UpdateMode === 1);
         const due = force
             || root.configuration.CurrentImagePath.length === 0
             || switchToNew
@@ -333,13 +368,13 @@ WallpaperItem {
             return;
         }
 
-        root.queue = root.orderPool(entries, switchToNew);
+        root.queue = switchToNew ? fresh : root.orderPool(entries);
         root.attempt = 0;
         root.tryNextCandidate();
     }
 
-    function orderPool(entries, switchToNew) {
-        if (switchToNew || root.configuration.Selection === 2) {
+    function orderPool(entries) {
+        if (root.configuration.Selection === 2) {
             return entries; // already newest first
         }
         const seen = root.configuration.SeenIds || [];
@@ -375,7 +410,7 @@ WallpaperItem {
 
     function tryNextCandidate() {
         // Generous, because a source can advertise entries whose variants all
-        // turn out to be too small (Flickr without an API key, typically).
+        // turn out to be unusable.
         if (root.attempt >= Math.min(8, root.queue.length)) {
             root.busy = false;
             root.statusMessage = i18nd(root.domain, "No usable image variant found");
@@ -404,23 +439,53 @@ WallpaperItem {
             return;
         }
 
-        shell.run(Commands.probeCommand(shell.quote, Sources.UA, remaining, root.maxBytes(), root.minBytes()), function (result) {
+        shell.run(Commands.resolveCommand(shell.quote, Sources.UA, remaining, root.maxBytes(),
+                                          root.minBytes(), root.cacheDir, entry.id,
+                                          root.sizeFloor()),
+                  function (result) {
             if (result.code !== 0 || result.stdout.trim().length === 0) {
                 root.markSeen(entry.id);
                 root.tryNextCandidate();
                 return;
             }
-            const url = Commands.probeResultUrl(result.stdout);
-            root.download(entry, url, remaining);
+            const resolved = Commands.probeResultUrl(result.stdout);
+            if (Commands.resolvedFromCache(result.stdout)) {
+                root.applyImage(entry, resolved, root.variantMatching(entry, resolved));
+                return;
+            }
+            root.download(entry, resolved, remaining);
         });
+    }
+
+    /**
+     * The variant URL to remember for a copy that was already in the cache.
+     * Which one it was downloaded from is not recorded anywhere, and the
+     * history only needs a URL that would fetch this picture again if the
+     * file is pruned, so the extension picks the closest candidate.
+     */
+    function variantMatching(entry, path) {
+        const fileName = String(path).replace(/^.*\//, "");
+        return entry.candidates.find(candidate =>
+            Commands.cacheFileName(entry.id, candidate) === fileName) || entry.candidates[0];
     }
 
     function download(entry, url, candidates) {
         const destination = root.cacheDir + "/" + Commands.cacheFileName(entry.id, url);
         const command = Commands.downloadCommand(shell.quote, Sources.UA, root.cacheDir,
-                                                 url, destination, root.maxBytes());
+                                                 url, destination, root.maxBytes(),
+                                                 root.sizeFloor());
 
         shell.run(command, function (result) {
+            if (result.code === 4) {
+                // Smaller than the screen needs, measured. Every size a source
+                // states was checked before the download, so this is a picture
+                // whose size was not stated — an original, which the other
+                // variants are cut from: none of them would be sharper, only
+                // enlarged by the source instead.
+                root.markSeen(entry.id);
+                root.tryNextCandidate();
+                return;
+            }
             if (result.code === 3) {
                 // Only knowable after the fact for on-the-fly renditions: the
                 // variant blew the budget, so retry with the smaller ones.
@@ -533,34 +598,39 @@ WallpaperItem {
         }
     }
 
-    Item {
-        id: blurLayer
+    // Behind a Loader rather than merely hidden: the blur is off by default and
+    // only makes sense for the fill modes that leave a gap, so most desktops
+    // have no reason to carry a second decoded copy of the image and a
+    // full-screen effect pipeline at all.
+    Loader {
         anchors.fill: parent
-        visible: root.configuration.Blur
-                 && root.imageFillMode !== Image.PreserveAspectCrop
-                 && root.imageFillMode !== Image.Stretch
-                 && root.imageFillMode !== Image.Tile
+        active: root.configuration.Blur
+                && root.imageFillMode !== Image.PreserveAspectCrop
+                && root.imageFillMode !== Image.Stretch
+                && root.imageFillMode !== Image.Tile
 
-        Image {
-            id: blurSource
-            anchors.fill: parent
-            visible: false
-            asynchronous: true
-            cache: false
-            autoTransform: true
-            fillMode: Image.PreserveAspectCrop
-            source: blurLayer.visible ? root.imageSource : ""
-            sourceSize: Qt.size(480, 480)
-        }
+        sourceComponent: Item {
+            Image {
+                id: blurSource
+                anchors.fill: parent
+                visible: false
+                asynchronous: true
+                cache: false
+                autoTransform: true
+                fillMode: Image.PreserveAspectCrop
+                source: root.imageSource
+                sourceSize: Qt.size(480, 480)
+            }
 
-        MultiEffect {
-            anchors.fill: parent
-            source: blurSource
-            autoPaddingEnabled: false
-            blurEnabled: true
-            blur: 1.0
-            blurMax: 64
-            visible: blurSource.status === Image.Ready
+            MultiEffect {
+                anchors.fill: parent
+                source: blurSource
+                autoPaddingEnabled: false
+                blurEnabled: true
+                blur: 1.0
+                blurMax: 64
+                visible: blurSource.status === Image.Ready
+            }
         }
     }
 
@@ -577,6 +647,14 @@ WallpaperItem {
 
         function loadImage() {
             if (root.imageSource.toString().length === 0) {
+                return;
+            }
+            // Until the containment has given us a size, targetSize is 0x0 —
+            // which Image reads as "no limit" and decodes the file at its
+            // native resolution: some 60 MB of pixels for a 3840x3840 release,
+            // thrown away the moment the real size arrives. Waiting costs
+            // nothing, onTargetSizeChanged comes straight back here.
+            if (imageView.width <= 0 || imageView.height <= 0) {
                 return;
             }
             if (imageView.pendingImage) {
@@ -703,11 +781,24 @@ WallpaperItem {
         onTriggered: root.advance()
     }
 
+    /**
+     * Plasma restarts more often than the sources publish — a session login, a
+     * crash, an install. Querying every API five seconds into each of those is
+     * work for an answer we already have, so it is skipped while the last
+     * switch is more recent than the poll interval; checkTimer picks the
+     * check up from there.
+     */
     Timer {
         id: startupTimer
         interval: 5000
         repeat: false
-        onTriggered: root.update(false)
+        onTriggered: {
+            if (root.configuration.CurrentImagePath.length > 0
+                    && !root.intervalElapsed(checkTimer.interval)) {
+                return;
+            }
+            root.update(false);
+        }
     }
 
     onBusyChanged: root.busy ? watchdog.restart() : watchdog.stop()
@@ -721,12 +812,13 @@ WallpaperItem {
         // Changing the sources invalidates the cached pool, otherwise a source
         // just switched off would keep supplying images for another 15 minutes.
         function onSourceNasaScienceChanged() { root.resetPool(); }
-        function onSourceNasaChanged() { root.resetPool(); }
         function onSourceEsaChanged() { root.resetPool(); }
-        function onSourceFlickrChanged() { root.resetPool(); }
         function onSourceJwstApiChanged() { root.resetPool(); }
-        function onFlickrApiKeyChanged() { root.resetPool(); }
+        function onJwstApiKeyChanged() { root.resetPool(); }
         function onSkipLowResolutionChanged() { root.resetPool(); }
+        function onMatchScreenResolutionChanged() { root.resetPool(); }
+        // The size floor depends on whether the picture has to fill the screen.
+        function onFillModeChanged() { root.resetPool(); }
         function onPhotographsOnlyChanged() { root.resetPool(); }
         function onUpdateModeChanged() { root.rescheduleTimer(); }
         function onUpdateIntervalSecondsChanged() { root.rescheduleTimer(); }

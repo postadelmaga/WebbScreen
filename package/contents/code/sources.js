@@ -14,7 +14,14 @@
  *     infoUrl:     "https://esawebb.org/images/potm2608c/",
  *     date:        1756281600000,             // ms since epoch, 0 when unknown
  *     candidates:  ["https://…large.jpg", …]  // ordered biggest first
+ *     mediaText:   "Artist's concept of the …",            // optional
+ *     instrument:  "NIRCam",                               // optional
  *   }
+ *
+ * `mediaText` and `instrument` exist only for the filters in fetchAll() and are
+ * dropped once those have run. `mediaText` is the full, untruncated caption:
+ * the sentence that gives an illustration away is often the credit line at the
+ * very end.
  *
  * Nothing here touches the filesystem: main.qml probes the candidates and
  * picks the largest one that fits the configured download budget.
@@ -22,67 +29,90 @@
 
 var UA = "Mozilla/5.0 (X11; Linux x86_64) WebbScreen/1.0 (KDE Plasma wallpaper)";
 
-var FLICKR_NSID = "50785054@N03"; // NASA's James Webb Space Telescope
-// The size suffixes reachable from the public feed, with their fixed long-edge
-// widths, so a variant can be ruled out as too small before it is ever
-// requested. The list stops at "_b" (1024 px) because that is where the feed
-// stops: it hands out the small "_m" URL, the suffixes up to "_b" resolve
-// against that same secret, and every larger one — "_h", "_k", "_3k", "_4k" … —
-// is served under a different secret and answers 410 Gone for every photo in
-// the stream. Those sizes exist only with an API key; see FLICKR_EXTRAS.
-var FLICKR_SIZES = [
-    { suffix: "_b", width: 1024 },
-    { suffix: "_c", width: 800 },
-    { suffix: "_z", width: 640 }
-];
-var FLICKR_EXTRAS = [
-    { key: "url_o", width: Infinity },
-    { key: "url_6k", width: 6144 },
-    { key: "url_5k", width: 5120 },
-    { key: "url_4k", width: 4096 },
-    { key: "url_3k", width: 3072 },
-    { key: "url_k", width: 2048 },
-    { key: "url_h", width: 1600 },
-    { key: "url_b", width: 1024 }
-];
-
 var ESA_FEED = "https://esawebb.org/images/feed/";
+// "large" is the release JPEG at its own size, which the feed does not state;
+// the download is measured instead. The wallpaper sizes are fixed crops cut
+// from it, enlarged when it is smaller than they are. "screen" keeps the
+// aspect and is 1280 wide.
 var ESA_VARIANTS = [
-    { name: "large", width: Infinity }, // the unscaled release JPEG
-    { name: "wallpaper5", width: 2048 },
-    { name: "wallpaper4", width: 1920 },
+    { name: "large", width: Infinity },
+    { name: "wallpaper5", width: 2048, height: 1536 },
+    { name: "wallpaper4", width: 1920, height: 1200 },
     { name: "screen", width: 1280 }
 ];
 
-var NASA_SEARCH = "https://images-api.nasa.gov/search";
-var NASA_VARIANTS = ["~orig", "~large", "~medium"];
-// Captions that read like an astronomical subject rather than a press photo.
-var NASA_SUBJECT = /nebula|galax|star cluster|starburst|exoplanet|protostar|supernova|deep field|cosmic cliff|jupiter|saturn|neptune|uranus|asteroid|comet|quasar|black hole|transmission spectrum|carina|orion|pillars of creation|stephan|smacs|wasp-|dark matter|infrared (image|view)/i;
-var NASA_EVENT = /town hall|panel|ceremony|award|briefing|interview|portrait|administrator|festival|screening|premiere|employee|visit|tour|clean ?room|technician|engineer|assembl|mirror|sunshield|installation|rollout|conference|revealed|artist event|shake, rattle/i;
-
-// webbtelescope.org (STScI) now redirects to science.nasa.gov, whose WordPress
-// REST API carries the Webb release stream under one category.
-var NASA_SCIENCE_API = "https://science.nasa.gov/wp-json/wp/v2/posts";
-var NASA_SCIENCE_CATEGORY = 2881; // "James Webb Space Telescope (JWST)"
+// webbtelescope.org (STScI) now redirects to science.nasa.gov. Its WordPress
+// REST API publishes every picture of a release as a separate "stma" (science
+// asset), titled for what it shows — "Cat's Head Nebula (Webb NIRCam Image)" —
+// and filed under a science-org taxonomy that already tells photographs from
+// artwork, infographics, spectra and videos.
+var NASA_SCIENCE_API = "https://science.nasa.gov/wp-json/wp/v2/stma";
+var NASA_SCIENCE_IMAGES = 20138; // science-org "webb-images": every still, no videos
+// science-org terms that are not photographs of the sky: artist concepts,
+// infographics, spectra, side-by-side comparisons, engineering photos.
+var NASA_SCIENCE_NOT_PHOTOS = [22779, 22699, 22758, 22670, 22666];
 var NASA_SCIENCE_WIDTHS = [3840, 2560, 1920, 1440];
 
 var JWST_API = "https://api.jwstapi.com/all/type/jpg";
 
-// Not every release is a photograph. Titles follow a tight convention across
-// the sources — "(artist's concept)", "transmission spectrum", "(annotated
-// NIRCam image)" — so they can be matched broadly. Captions cannot: a genuine
-// NIRCam image happily mentions "spectrum" in passing, so only the phrases that
-// admit no other reading are matched there.
+// Not every release is a photograph. Three vocabularies, each matched against
+// the text it suits, because the same word carries a different weight
+// depending on where it appears:
+//
+//   NON_PHOTO_TITLE  Titles follow a tight convention across all the sources —
+//                    "(artist's concept)", "transmission spectrum", "(annotated
+//                    NIRCam image)", "(Compass Image)". A title naming the
+//                    medium is decisive, so this one casts the widest net.
+//
+//   NON_PHOTO_MEDIUM Image captions describe the medium in prose: "An
+//                    illustration of…", "Artist's concept of…". Bare
+//                    "illustration" is safe here, but "spectrum", "annotated"
+//                    and "simulation" are not: genuine NIRCam captions use
+//                    them in passing.
+//
+//   NON_PHOTO_TEXT   Article prose, which describes the science rather than the
+//                    picture. Only the phrases that admit no other reading.
+//
 // The apostrophe class covers both the plain and the typographic one: ESA and
 // NASA write "artist’s concept" with U+2019.
-var NON_PHOTO_TITLE = /artist['’]?s?[\s-]*(concept|impression|rendering|illustration|view)|\b(illustration|illustrated|artwork|infographic|diagram|schematic|light ?curve|animation|simulation|annotated|compass image|poster|timeline|data visuali[sz]ation)\b|\bspectr(um|a|oscopy)\b/i;
+var NON_PHOTO_TITLE = /artist['’]?s?[\s-]*(concept|impression|rendering|illustration|view)|\b(illustration|illustrated|artwork|infographic|diagram|schematic|light ?curve|animation|simulation|annotated|compass|collage|side-?by-?side|compar(ison|ed)|contour|poster|timeline|screenshot|stamps?|visuali[sz]ation)\b|\bspectr(um|a|oscopy)\b/i;
+var NON_PHOTO_MEDIUM = /artist['’]?s?[\s-]*(concept|impression|illustration|rendering|view)|\b(illustration|illustrated|artwork|infographic|schematic|screenshot|photo ?illustration)\b/i;
 var NON_PHOTO_TEXT = /artist['’]?s?[\s-]*(concept|impression|illustration|rendering)/i;
+
+// The Webb release stream is not only sky: it also carries the observatory's
+// public life — hardware on show at a museum, an award, a stamp issue. Those
+// are photographs, so the vocabularies above pass them, but nobody wants one
+// as a wallpaper. Matched against titles only: "mirror", "panel" and "tour"
+// belong to a caption about a real nebula as readily as to a press event.
+var NON_SKY_TITLE = /\b(hall of fame|award|ceremony|exhibit(ion)?|museum|smithsonian|hangar|clean ?room|pathfinder|mock-?up|logo|postage)\b/i;
+
+/// Folds the separators the sources use inside filenames into spaces, so that
+/// "Wasp-96_b_transmission_spectrum" reads as words. Without this the \b in
+/// the patterns above never fires: an underscore is a word character.
+function words(text) {
+    return String(text || "").replace(/[_+.\/]+/g, " ");
+}
 
 /// True when the entry looks like an actual photograph rather than a diagram,
 /// a spectrum or an artist's rendering.
 function isPhotograph(entry) {
-    return !NON_PHOTO_TITLE.test(entry.title || "")
-        && !NON_PHOTO_TEXT.test(entry.description || "");
+    const title = words(entry.title);
+    return !NON_PHOTO_TITLE.test(title)
+        && !NON_SKY_TITLE.test(title)
+        && !NON_PHOTO_MEDIUM.test(words(entry.mediaText))
+        && !NON_PHOTO_TEXT.test(words(entry.description));
+}
+
+// A joint release files every observatory's picture together: the Hubble frame
+// of the Cat's Head Nebula sits in the Webb stream next to the NIRCam and MIRI
+// ones, under the same release. A picture that names another telescope and
+// not Webb is that telescope's.
+var WEBB = /\b(webb|jwst|nircam|miri|nirspec|niriss)\b/i;
+var OTHER_TELESCOPE = /\b(hubble|hst|wfc3|wfpc2|acs|chandra|spitzer)\b/i;
+
+function isWebb(entry) {
+    const text = words(entry.title) + " | " + words(entry.instrument);
+    return WEBB.test(text) || !OTHER_TELESCOPE.test(text);
 }
 
 /* ------------------------------------------------------------------ utils */
@@ -115,25 +145,41 @@ function httpGet(url, headers, onDone) {
     }
 }
 
+// The named entities the sources actually use; science.nasa.gov writes its
+// captions with &rsquo; and friends rather than numeric references.
+var NAMED_ENTITIES = {
+    quot: '"', apos: "'", nbsp: " ", lt: "<", gt: ">",
+    lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”",
+    ndash: "–", mdash: "—", hellip: "…", deg: "°", times: "×", micro: "µ"
+};
+
 function decodeEntities(s) {
     return String(s)
         .replace(/&#(\d+);/g, function (_, d) { return String.fromCharCode(parseInt(d, 10)); })
         .replace(/&#x([0-9a-f]+);/gi, function (_, h) { return String.fromCharCode(parseInt(h, 16)); })
-        .replace(/&quot;/g, '"')
-        .replace(/&apos;/g, "'")
-        .replace(/&nbsp;/g, " ")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
+        .replace(/&([a-z]+);/gi, function (whole, name) {
+            return NAMED_ENTITIES.hasOwnProperty(name) ? NAMED_ENTITIES[name] : whole;
+        })
         .replace(/&amp;/g, "&");
 }
 
+/// How much of a caption an entry carries for display.
+var DESCRIPTION_LENGTH = 400;
+
 function stripHtml(s, maxLength) {
-    let out = decodeEntities(String(s || "").replace(/<[^>]*>/g, " "));
-    out = out.replace(/\s+/g, " ").trim();
-    if (maxLength && out.length > maxLength) {
-        out = out.substring(0, maxLength).replace(/\s+\S*$/, "") + "…";
+    const out = decodeEntities(String(s || "").replace(/<[^>]*>/g, " "))
+        .replace(/\s+/g, " ").trim();
+    return maxLength ? truncate(out, maxLength) : out;
+}
+
+/// Cuts on a word boundary, so a caption kept in full for filtering can still
+/// be shown short.
+function truncate(text, maxLength) {
+    const out = String(text || "");
+    if (out.length <= maxLength) {
+        return out;
     }
-    return out;
+    return out.substring(0, maxLength).replace(/\s+\S*$/, "") + "…";
 }
 
 function rssItems(text) {
@@ -168,23 +214,66 @@ function httpsify(url) {
     return String(url).replace(/^http:/, "https:");
 }
 
-/// Keeps the variants at least `minWidth` wide, or all of them when unfiltered.
-function atLeastAsWideAs(variants, minWidth) {
-    if (!minWidth) {
-        return variants;
+/**
+ * True when an image this size is drawn without being enlarged. Filling the
+ * screen (cropped or stretched) takes both the width and the height of the
+ * screen; fitting inside it takes either. An unknown height passes on the width
+ * alone — the download is measured once it lands.
+ *
+ * `cfg.targetWidth`/`targetHeight` are the screen in physical pixels and
+ * `cfg.fillsScreen` says which of the two rules the fill mode calls for.
+ */
+function largeEnough(width, height, cfg) {
+    const wide = width >= (cfg.targetWidth || 0);
+    if (!(height > 0) || !cfg.targetHeight) {
+        return wide;
     }
-    return variants.filter(function (v) { return v.width >= minWidth; });
+    const tall = height >= cfg.targetHeight;
+    return cfg.fillsScreen ? (wide && tall) : (wide || tall);
 }
 
-/// Flickr captions are peppered with :emoji_shortcodes:.
-function stripShortcodes(text) {
-    return String(text).replace(/:[a-z][a-z0-9_+-]{1,30}:/g, " ").replace(/\s+/g, " ").trim();
+/// The narrowest rendition of an image of this aspect (height / width) that
+/// is large enough for the screen.
+function widthNeeded(aspect, cfg) {
+    const width = cfg.targetWidth || 0;
+    if (!(aspect > 0) || !cfg.targetHeight) {
+        return width;
+    }
+    const forHeight = Math.ceil(cfg.targetHeight / aspect);
+    return cfg.fillsScreen ? Math.max(width, forHeight) : Math.min(width, forHeight);
 }
 
-// Feed authors look like: nobody@flickr.com ("James Webb Space Telescope")
-function flickrAuthorName(author) {
-    const m = String(author || "").match(/\("([^"]+)"\)/);
-    return m ? m[1] : "";
+/// Drops the variants too small for the screen, unless that floor is off.
+function largeEnoughOnly(variants, cfg) {
+    if (!cfg.skipLowResolution) {
+        return variants.slice();
+    }
+    return variants.filter(function (v) { return largeEnough(v.width, v.height, cfg); });
+}
+
+/**
+ * Orders a provider's variants — handed in biggest first — the way the probe
+ * should walk them, and drops the ones too small for the screen.
+ *
+ * The default is the caller's order: the biggest variant the budget allows,
+ * which is also what "Save a Copy to Pictures" then hands you. With
+ * `cfg.matchScreen` the order starts instead at the smallest variant that is
+ * still large enough — the wallpaper is drawn at screen resolution either way
+ * (the Image's sourceSize decodes no more than that), so this trades nothing
+ * visible for a fraction of the bytes and the decode time.
+ */
+function chooseVariants(variants, cfg) {
+    const usable = largeEnoughOnly(variants, cfg);
+    if (!cfg.matchScreen || usable.length < 2) {
+        return usable;
+    }
+    const enough = function (v) { return largeEnough(v.width, v.height, cfg); };
+    const covering = usable.filter(enough)
+                           .sort(function (a, b) { return a.width - b.width; });
+    // Nothing large enough: fall back to the biggest there is, which is the
+    // order they came in.
+    const short = usable.filter(function (v) { return !enough(v); });
+    return covering.concat(short);
 }
 
 /* ------------------------------------------------------------------ ESA/Webb */
@@ -206,19 +295,26 @@ function esa(cfg, done) {
             const slug = slugMatch ? slugMatch[1]
                                    : enclosure.replace(/^.*\//, "").replace(/\.[a-z]+$/i, "");
 
-            const candidates = atLeastAsWideAs(ESA_VARIANTS, cfg.minWidth).map(function (variant) {
+            // Not reordered for matchScreen: a wallpaper crop is only as sharp
+            // as the original it was cut from, and that size is unknown until
+            // "large" has been fetched. Walking biggest first, a crop is reached
+            // only once "large" has blown the budget — which means the
+            // original is huge and the crop a true reduction of it.
+            const candidates = largeEnoughOnly(ESA_VARIANTS, cfg).map(function (variant) {
                 return enclosure.replace(/\/archives\/images\/[^\/]+\//, "/archives/images/" + variant.name + "/");
             });
             if (candidates.length === 0) {
                 return;
             }
 
+            const caption = stripHtml(tagText(item, "description"));
             list.push({
                 id: "esa:" + slug,
                 source: "esa",
                 sourceName: "ESA/Webb",
                 title: stripHtml(tagText(item, "title")),
-                description: stripHtml(tagText(item, "description"), 400),
+                description: truncate(caption, DESCRIPTION_LENGTH),
+                mediaText: caption,
                 credit: "ESA/Webb, NASA & CSA",
                 infoUrl: link,
                 date: parseDate(tagText(item, "pubDate")),
@@ -229,119 +325,21 @@ function esa(cfg, done) {
     });
 }
 
-/* ------------------------------------------------------------------ NASA */
-
-// images.nasa.gov indexes the whole agency archive, so a plain "James Webb
-// Space Telescope" query returns mostly clean-room and press-event photography.
-// Two complementary queries are merged instead:
-//   * everything filed under the STScI centres — the curated science releases;
-//   * a broad query, kept only when the caption reads like an astronomical
-//     subject and not like an event photo.
-function nasa(cfg, done) {
-    const curated = NASA_SEARCH + "?media_type=image&page_size=100&center=STScI";
-    const broad = NASA_SEARCH
-        + "?q=" + encodeURIComponent("James Webb Space Telescope")
-        + "&media_type=image&page_size=100";
-
-    let pending = 2;
-    let merged = [];
-    const errors = [];
-
-    function collect(err, list) {
-        if (err) {
-            errors.push(err);
-        }
-        merged = merged.concat(list);
-        if (--pending === 0) {
-            done(merged, errors.length === 2 ? errors.join("; ") : null);
-        }
-    }
-
-    httpGet(curated, null, function (err, text) {
-        collect(err, err ? [] : nasaEntries(text, true));
-    });
-    httpGet(broad, null, function (err, text) {
-        collect(err, err ? [] : nasaEntries(text, false));
-    });
-}
-
-function nasaEntries(text, curated) {
-    let payload;
-    try {
-        payload = JSON.parse(text);
-    } catch (e) {
-        return [];
-    }
-    const items = (payload.collection && payload.collection.items) || [];
-    const list = [];
-
-    items.forEach(function (item) {
-        const data = (item.data || [])[0];
-        if (!data || !data.nasa_id) {
-            return;
-        }
-        const haystack = [data.title, data.description, data.description_508,
-                          (data.keywords || []).join(" ")].join(" ");
-
-        if (curated) {
-            // The STScI centres also host Hubble releases.
-            if (!/webb|jwst|nircam|miri|nirspec/i.test(haystack + " " + data.center)) {
-                return;
-            }
-        } else {
-            if (/^(HQ|JSC|KSC|MSFC|LaRC)$/.test(data.center || "")) {
-                return;
-            }
-            if (NASA_EVENT.test(haystack) || !NASA_SUBJECT.test(haystack)) {
-                return;
-            }
-        }
-
-        const preview = (item.links || []).filter(function (l) {
-            return l.render === "image" && l.href;
-        }).map(function (l) { return httpsify(l.href); })[0];
-        if (!preview) {
-            return;
-        }
-
-        // https://…/PIA11195~thumb.jpg  ->  https://…/PIA11195~orig.jpg
-        const parts = preview.match(/^(.*)~[a-z0-9]+(\.[a-z]+)$/i);
-        let candidates;
-        if (parts) {
-            candidates = NASA_VARIANTS.map(function (v) { return parts[1] + v + parts[2]; });
-            if (parts[2].toLowerCase() !== ".png") {
-                candidates.splice(1, 0, parts[1] + "~orig.png");
-            }
-        } else {
-            candidates = [preview];
-        }
-
-        list.push({
-            id: "nasa:" + data.nasa_id,
-            source: "nasa",
-            sourceName: "NASA Image Library",
-            title: stripHtml(data.title),
-            description: stripHtml(data.description || data.description_508, 400),
-            credit: data.secondary_creator || ("NASA" + (data.center ? "/" + data.center : "")),
-            infoUrl: "https://images.nasa.gov/details/" + encodeURIComponent(data.nasa_id),
-            date: parseDate(data.date_created),
-            candidates: candidates
-        });
-    });
-    return list;
-}
-
 /* ------------------------------------------------------ NASA Science (STScI) */
 
-// The press images sit behind an on-the-fly rendition service that answers
-// neither Content-Length nor range requests, so the size of a variant cannot be
-// probed — it is estimated from the rendition's pixel count instead, and
-// main.qml re-checks the real size once the file has landed.
+// The pictures sit behind an on-the-fly rendition service that answers neither
+// Content-Length nor range requests, so the size of a variant cannot be probed:
+// it is estimated from the rendition's pixel count instead, and main.qml
+// re-checks the real size once the file has landed.
 function nasascience(cfg, done) {
-    const url = NASA_SCIENCE_API
-        + "?categories=" + NASA_SCIENCE_CATEGORY
+    let url = NASA_SCIENCE_API
+        + "?science-org=" + NASA_SCIENCE_IMAGES
         + "&per_page=100&orderby=date&order=desc"
-        + "&_fields=" + encodeURIComponent("id,slug,date_gmt,link,title,excerpt,featured_image_url");
+        + "&_fields=" + encodeURIComponent("id,slug,date_gmt,link,title,excerpt,"
+                                           + "acf.downloads,acf.data_instrument,acf.credits");
+    if (cfg.photographsOnly) {
+        url += "&science-org_exclude=" + NASA_SCIENCE_NOT_PHOTOS.join(",");
+    }
 
     httpGet(url, null, function (err, text) {
         if (err) {
@@ -362,18 +360,13 @@ function nasascience(cfg, done) {
 
         const budget = cfg.maxBytes || (25 * 1024 * 1024);
         const list = [];
-
         items.forEach(function (item) {
-            const image = item.featured_image_url || "";
-            const title = stripHtml((item.title || {}).rendered);
-            if (!image) {
+            const acf = item.acf || {};
+            const master = nasaScienceMaster(acf.downloads);
+            if (!master) {
                 return;
             }
-            // The Webb category also tags the odd Hubble or multi-mission release.
-            if (!/\/missions\/webb\//.test(image) && !/webb/i.test(title)) {
-                return;
-            }
-            const candidates = nasaScienceCandidates(image, budget, cfg.minWidth);
+            const candidates = nasaScienceCandidates(master, budget, cfg);
             if (candidates.length === 0) {
                 return;
             }
@@ -381,161 +374,56 @@ function nasascience(cfg, done) {
                 id: "nasascience:" + (item.slug || item.id),
                 source: "nasascience",
                 sourceName: "NASA Science — Webb",
-                title: title,
-                description: stripHtml((item.excerpt || {}).rendered, 400),
-                credit: "NASA, ESA, CSA, STScI",
+                title: stripHtml((item.title || {}).rendered),
+                description: stripHtml((item.excerpt || {}).rendered, DESCRIPTION_LENGTH),
+                credit: stripHtml(acf.credits) || "NASA, ESA, CSA, STScI",
                 infoUrl: item.link,
                 date: parseDate(item.date_gmt ? item.date_gmt + "Z" : item.date),
-                candidates: candidates
+                candidates: candidates,
+                instrument: stripHtml(acf.data_instrument)
             });
         });
         done(list, null);
     });
 }
 
-function nasaScienceCandidates(imageUrl, budget, minWidth) {
-    const split = imageUrl.split("?");
-    const base = split[0];
-    if (split.length < 2) {
-        return [imageUrl]; // a plain upload, not served by the rendition service
-    }
-    const widthMatch = split[1].match(/(?:^|&)w=(\d+)/);
-    const heightMatch = split[1].match(/(?:^|&)h=(\d+)/);
-    if (!widthMatch || !heightMatch) {
-        return [imageUrl];
-    }
-    const nativeWidth = parseInt(widthMatch[1], 10);
-    const aspect = parseInt(heightMatch[1], 10) / nativeWidth;
+/// The asset's own file. Every other download listed beside it is a rendition
+/// of it, filed under jcr:content/renditions/.
+function nasaScienceMaster(downloads) {
+    return (Array.isArray(downloads) ? downloads : []).filter(function (d) {
+        return d && d.url && d.width > 0 && d.height > 0 && !/\/jcr:content\//.test(d.url);
+    })[0] || null;
+}
+
+function nasaScienceCandidates(master, budget, cfg) {
+    // The rendition service serves the same path, and turns the TIFF masters
+    // into JPEG on the way.
+    const base = String(master.url).replace("/content/dam/", "/dynamicimage/assets/");
+    const nativeWidth = master.width;
+    const aspect = master.height / master.width;
     // PNG renditions run about 1.6 bytes per pixel, JPEG ones far less.
     const bytesPerPixel = /\.png$/i.test(base) ? 1.6 : 0.3;
 
-    // Native resolution first, then the standard renditions below it.
-    let widths = [nativeWidth].concat(NASA_SCIENCE_WIDTHS.filter(function (w) {
-        return w < nativeWidth;
-    }));
-    if (minWidth) {
-        widths = widths.filter(function (w) { return w >= minWidth; });
-        if (widths.length === 0) {
-            return []; // the release itself is smaller than the screen
-        }
+    // Native resolution first, then the standard renditions below it, plus the
+    // exact width this screen needs: the service renders any width, so a
+    // 3440-wide or a 5K screen gets its own size rather than the next one up.
+    const widths = [nativeWidth].concat(NASA_SCIENCE_WIDTHS, [widthNeeded(aspect, cfg)])
+        .filter(function (w, index, all) {
+            return w > 0 && w <= nativeWidth && all.indexOf(w) === index;
+        })
+        .sort(function (a, b) { return b - a; });
+    const variants = largeEnoughOnly(widths.map(function (w) {
+        const height = Math.round(w * aspect);
+        return { width: w, height: height, bytes: w * height * bytesPerPixel };
+    }), cfg);
+    if (variants.length === 0) {
+        return []; // the release itself is smaller than the screen
     }
-    const affordable = widths.filter(function (w) {
-        return w * (w * aspect) * bytesPerPixel <= budget;
-    });
-    const chosen = affordable.length > 0 ? affordable : [widths[widths.length - 1]];
+    const affordable = variants.filter(function (v) { return v.bytes <= budget; });
+    const chosen = affordable.length > 0 ? affordable : [variants[variants.length - 1]];
 
-    return chosen.map(function (w) { return base + "?w=" + w + "&fit=clip"; });
-}
-
-/* ------------------------------------------------------------------ Flickr */
-
-function flickr(cfg, done) {
-    const key = String(cfg.flickrApiKey || "").trim();
-    if (key) {
-        flickrWithKey(key, cfg.minWidth, done);
-    } else {
-        flickrPublicFeed(cfg.minWidth, done);
-    }
-}
-
-// Keyless: the public photostream feed, which tops out at 1024 px — see
-// FLICKR_SIZES. Offering the larger suffixes anyway, as this used to, fills the
-// pool with entries whose every variant 410s; because they are the newest
-// images they sit at the head of the queue, where they burn through the attempt
-// budget in main.qml before a usable picture is ever reached.
-function flickrPublicFeed(minWidth, done) {
-    const url = "https://api.flickr.com/services/feeds/photos_public.gne?id="
-        + FLICKR_NSID + "&format=json&nojsoncallback=1";
-
-    httpGet(url, null, function (err, text) {
-        if (err) {
-            done([], err);
-            return;
-        }
-        let payload;
-        try {
-            payload = JSON.parse(text);
-        } catch (e) {
-            done([], "Flickr: malformed JSON");
-            return;
-        }
-        const list = [];
-        (payload.items || []).forEach(function (item) {
-            const small = item.media && item.media.m;
-            if (!small) {
-                return;
-            }
-            const idMatch = String(item.link).match(/\/(\d+)\/?$/);
-            const stem = small.replace(/_[a-z0-9]+\.jpg$/i, "");
-            const sizes = atLeastAsWideAs(FLICKR_SIZES, minWidth);
-            if (sizes.length === 0) {
-                return;
-            }
-            list.push({
-                id: "flickr:" + (idMatch ? idMatch[1] : stem),
-                source: "flickr",
-                sourceName: "Flickr — NASA Webb",
-                title: stripHtml(item.title),
-                description: stripShortcodes(stripHtml(String(item.description || "").replace(/^[\s\S]*?posted a photo:/i, ""), 400)),
-                credit: flickrAuthorName(item.author) || "NASA/ESA/CSA — James Webb Space Telescope",
-                infoUrl: item.link,
-                date: parseDate(item.date_taken || item.published),
-                candidates: sizes.map(function (size) { return stem + size.suffix + ".jpg"; })
-            });
-        });
-        done(list, null);
-    });
-}
-
-// With a (free) API key we get the real URLs, originals included, in one call.
-function flickrWithKey(key, minWidth, done) {
-    const extras = "description,date_upload,date_taken,owner_name,url_o,url_6k,url_5k,url_4k,url_3k,url_k,url_h,url_b";
-    const url = "https://api.flickr.com/services/rest/"
-        + "?method=flickr.people.getPublicPhotos&api_key=" + encodeURIComponent(key)
-        + "&user_id=" + FLICKR_NSID + "&per_page=100&page=1"
-        + "&extras=" + encodeURIComponent(extras)
-        + "&format=json&nojsoncallback=1";
-
-    httpGet(url, null, function (err, text) {
-        if (err) {
-            flickrPublicFeed(minWidth, done); // key rejected or offline: degrade gracefully
-            return;
-        }
-        let payload;
-        try {
-            payload = JSON.parse(text);
-        } catch (e) {
-            flickrPublicFeed(minWidth, done);
-            return;
-        }
-        if (payload.stat !== "ok" || !payload.photos) {
-            flickrPublicFeed(minWidth, done);
-            return;
-        }
-        const order = atLeastAsWideAs(FLICKR_EXTRAS, minWidth);
-        const list = [];
-        (payload.photos.photo || []).forEach(function (photo) {
-            const candidates = order.map(function (size) { return photo[size.key]; })
-                                    .filter(function (u) { return !!u; })
-                                    .map(httpsify);
-            if (candidates.length === 0) {
-                return;
-            }
-            const taken = photo.datetaken || "";
-            const uploaded = photo.dateupload ? parseInt(photo.dateupload, 10) * 1000 : 0;
-            list.push({
-                id: "flickr:" + photo.id,
-                source: "flickr",
-                sourceName: "Flickr — NASA Webb",
-                title: stripHtml(photo.title),
-                description: stripShortcodes(stripHtml(photo.description && photo.description._content, 400)),
-                credit: photo.ownername || "NASA/ESA/CSA — James Webb Space Telescope",
-                infoUrl: "https://www.flickr.com/photos/" + FLICKR_NSID + "/" + photo.id + "/",
-                date: parseDate(taken) || uploaded,
-                candidates: candidates
-            });
-        });
-        done(list, null);
+    return chooseVariants(chosen, cfg).map(function (v) {
+        return base + "?w=" + v.width + "&fit=clip";
     });
 }
 
@@ -571,7 +459,7 @@ function jwstapi(cfg, done) {
                 source: "jwstapi",
                 sourceName: "jwstapi.com (MAST)",
                 title: stripHtml(label),
-                description: stripHtml(details.suffix ? ("Suffix " + details.suffix) : "", 400),
+                description: stripHtml(details.suffix ? ("Suffix " + details.suffix) : "", DESCRIPTION_LENGTH),
                 credit: "NASA/STScI — MAST",
                 infoUrl: item.location,
                 date: parseDate(details.date || item.date),
@@ -584,11 +472,13 @@ function jwstapi(cfg, done) {
 
 /* ------------------------------------------------------------------ orchestration */
 
+// In order of preference: when two sources carry the same picture, the one
+// listed first is kept. science.nasa.gov states every picture's size and
+// renders it at whatever width the screen needs; ESA offers the original or a
+// handful of fixed crops, and its size is known only once it is downloaded.
 var PROVIDERS = {
-    nasa: nasa,
     nasascience: nasascience,
     esa: esa,
-    flickr: flickr,
     jwstapi: jwstapi
 };
 
@@ -598,8 +488,9 @@ var PROVIDERS = {
  * `entries` is deduplicated and sorted newest first.
  */
 function fetchAll(cfg, done) {
-    const enabled = (cfg.enabledSources || []).filter(function (name) {
-        return !!PROVIDERS[name];
+    const wanted = cfg.enabledSources || [];
+    const enabled = Object.keys(PROVIDERS).filter(function (name) {
+        return wanted.indexOf(name) !== -1;
     });
     if (enabled.length === 0) {
         done([], ["no source enabled"]);
@@ -607,7 +498,7 @@ function fetchAll(cfg, done) {
     }
 
     let pending = enabled.length;
-    let merged = [];
+    const results = {};
     const errors = [];
 
     enabled.forEach(function (name) {
@@ -615,28 +506,60 @@ function fetchAll(cfg, done) {
             if (err) {
                 errors.push(name + ": " + err);
             }
-            merged = merged.concat(list || []);
-            if (--pending === 0) {
-                let entries = dedupe(merged);
-                if (cfg.photographsOnly) {
-                    entries = entries.filter(isPhotograph);
-                }
-                done(entries, errors);
+            results[name] = list || [];
+            if (--pending > 0) {
+                return;
             }
+            // Merged in preference order, not in the order the answers came
+            // back, so that dedupe() keeps the same copy every time.
+            let entries = [];
+            enabled.forEach(function (n) { entries = entries.concat(results[n]); });
+            entries = entries.filter(isWebb);
+            if (cfg.photographsOnly) {
+                entries = entries.filter(isPhotograph);
+            }
+            entries = dedupe(entries);
+            // The filtering text has done its job; main.qml holds this pool
+            // for a quarter of an hour and only needs what the caption shows.
+            entries.forEach(function (entry) {
+                delete entry.mediaText;
+                delete entry.instrument;
+            });
+            done(entries, errors);
         });
     });
 }
 
+/**
+ * Drops repeats, keeping the first copy. A repeat is the same id, or the same
+ * title on the same day: a joint release goes out from ESA and NASA at once
+ * under one title ("Cat's Head Nebula (Webb NIRCam image)"), and ESA files
+ * several cuts of one picture under one title too.
+ */
 function dedupe(entries) {
     const seen = {};
     const out = [];
     entries.forEach(function (e) {
-        if (!e || !e.id || seen[e.id] || !e.candidates || e.candidates.length === 0) {
+        if (!e || !e.id || !e.candidates || e.candidates.length === 0) {
             return;
         }
-        seen[e.id] = true;
+        const keys = [e.id, sameTitleKey(e)];
+        if (keys.some(function (k) { return seen[k]; })) {
+            return;
+        }
+        keys.forEach(function (k) { seen[k] = true; });
         out.push(e);
     });
     out.sort(function (a, b) { return b.date - a.date; });
     return out;
+}
+
+function sameTitleKey(entry) {
+    const title = String(entry.title || "").toLowerCase()
+        .replace(/['’]/g, "")
+        .replace(/\bimages?\b/g, " ") // "(Webb MIRI)" and "(Webb MIRI Image)" alike
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+    const day = new Date(entry.date || 0).toISOString().slice(0, 10);
+    return "title:" + title + "|" + day;
 }

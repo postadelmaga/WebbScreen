@@ -25,17 +25,21 @@ Item {
     readonly property int alignment: overlay.atLeft ? Text.AlignLeft : Text.AlignRight
 
     readonly property real padding: Kirigami.Units.largeSpacing
+    readonly property real margin: Kirigami.Units.gridUnit * 2
     readonly property real maxContentWidth:
         Math.min(overlay.width - Kirigami.Units.gridUnit * 6, Kirigami.Units.gridUnit * 24)
 
     Rectangle {
         id: card
 
-        anchors.top: overlay.atTop ? parent.top : undefined
-        anchors.bottom: overlay.atTop ? undefined : parent.bottom
-        anchors.left: overlay.atLeft ? parent.left : undefined
-        anchors.right: overlay.atLeft ? undefined : parent.right
-        anchors.margins: Kirigami.Units.gridUnit * 2
+        // Placed by coordinate, not by anchor. An anchor cannot be cleared
+        // from a binding — assigning undefined to one is refused rather than
+        // honoured — so switching corners used to only ever *add* anchors:
+        // after visiting both sides the card was held left and right at once,
+        // which overrides its width, and top and bottom too. It ended up
+        // filling the screen with only the text still aligned to a side.
+        x: overlay.atLeft ? overlay.margin : overlay.width - width - overlay.margin
+        y: overlay.atTop ? overlay.margin : overlay.height - height - overlay.margin
 
         // Hug the text, but never grow past a comfortable reading measure.
         width: Math.min(overlay.maxContentWidth,

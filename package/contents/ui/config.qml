@@ -22,11 +22,8 @@ Kirigami.FormLayout {
     readonly property string domain: "plasma_wallpaper_org.kde.webbscreen"
 
     property alias cfg_SourceNasaScience: nasaScienceCheck.checked
-    property alias cfg_SourceNasa: nasaCheck.checked
     property alias cfg_SourceEsa: esaCheck.checked
-    property alias cfg_SourceFlickr: flickrCheck.checked
     property alias cfg_SourceJwstApi: jwstCheck.checked
-    property alias cfg_FlickrApiKey: flickrKeyField.text
     property alias cfg_JwstApiKey: jwstKeyField.text
 
     property int cfg_UpdateMode
@@ -37,6 +34,7 @@ Kirigami.FormLayout {
 
     property alias cfg_MaxDownloadMegabytes: maxSizeSpin.value
     property alias cfg_SkipLowResolution: skipLowResCheck.checked
+    property alias cfg_MatchScreenResolution: matchScreenCheck.checked
     property alias cfg_PhotographsOnly: photographsOnlyCheck.checked
     property alias cfg_CachedImageCount: cacheCountSpin.value
 
@@ -65,7 +63,7 @@ Kirigami.FormLayout {
 
         Kirigami.ContextualHelpButton {
             toolTipText: i18nd(root.domain,
-                "STScI's webbtelescope.org has been retired and now redirects here; this is where the Webb release stream ended up, and it carries the images at up to their native resolution.")
+                "STScI's webbtelescope.org has been retired and now redirects here. Every picture of every Webb release, each at its native resolution — the main source.")
         }
     }
 
@@ -73,46 +71,20 @@ Kirigami.FormLayout {
         spacing: Kirigami.Units.smallSpacing
 
         QQC2.CheckBox {
-            id: nasaCheck
-            text: i18nd(root.domain, "NASA Image and Video Library")
+            id: esaCheck
+            text: i18nd(root.domain, "ESA/Webb gallery (esawebb.org)")
         }
 
         Kirigami.ContextualHelpButton {
             toolTipText: i18nd(root.domain,
-                "The agency-wide archive indexes only a handful of Webb science images — mostly the July 2022 first-release set. Everything else it returns for Webb is clean-room and press-event photography, which this plugin filters out.")
+                "Carries the same joint releases as NASA — duplicates are merged — plus ESA's own Picture of the Month, which only appears here.")
         }
-    }
-
-    QQC2.CheckBox {
-        id: esaCheck
-        text: i18nd(root.domain, "ESA/Webb gallery (esawebb.org)")
-    }
-
-    QQC2.CheckBox {
-        id: flickrCheck
-        text: i18nd(root.domain, "Flickr — NASA's James Webb Space Telescope")
     }
 
     QQC2.CheckBox {
         id: jwstCheck
         text: i18nd(root.domain, "jwstapi.com (raw MAST previews)")
         enabled: jwstKeyField.text.trim().length > 0
-    }
-
-    RowLayout {
-        Kirigami.FormData.label: i18nd(root.domain, "Flickr API key:")
-        spacing: Kirigami.Units.smallSpacing
-
-        QQC2.TextField {
-            id: flickrKeyField
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 16
-            placeholderText: i18nd(root.domain, "Optional")
-        }
-
-        Kirigami.ContextualHelpButton {
-            toolTipText: i18nd(root.domain,
-                "Without a key, Flickr is limited to what the public photostream feed serves, which tops out at 1024 px — so with the screen-width floor above switched on, that source contributes nothing at all. A free key from flickr.com/services/apps/create unlocks original-resolution downloads.")
-        }
     }
 
     QQC2.TextField {
@@ -183,7 +155,8 @@ Kirigami.FormLayout {
         id: switchOnNewCheck
         Kirigami.FormData.label: i18nd(root.domain, "New releases:")
         text: i18nd(root.domain, "Switch as soon as a source publishes a new image")
-        enabled: root.cfg_UpdateMode !== 2
+        // Mode 1 always does; mode 2 never does on its own.
+        visible: root.cfg_UpdateMode === 0
     }
 
     QQC2.ComboBox {
@@ -242,7 +215,7 @@ Kirigami.FormLayout {
 
         Kirigami.ContextualHelpButton {
             toolTipText: i18nd(root.domain,
-                "Every source offers the same picture in several sizes. The largest one that fits this budget is downloaded; 25 MB is enough for the full-resolution ESA/Webb releases.")
+                "A ceiling, not a target: no variant larger than this is ever fetched. What normally decides the size is the screen — see below.")
         }
     }
 
@@ -252,12 +225,26 @@ Kirigami.FormLayout {
 
         QQC2.CheckBox {
             id: skipLowResCheck
-            text: i18nd(root.domain, "Only use images at least as wide as the screen")
+            text: i18nd(root.domain, "Only use images at least as large as the screen")
         }
 
         Kirigami.ContextualHelpButton {
             toolTipText: i18nd(root.domain,
-                "Variants narrower than your screen are discarded before they are downloaded, and a picture with nothing bigger on offer is skipped altogether. Turning this off lets small images through, upscaled. It bites hardest on Flickr without an API key, where the public feed tops out at 1024 px.")
+                "Keeps pictures from being enlarged. With “Scaled and cropped” or “Scaled” a picture must be both as wide and as tall as your screen in physical pixels; with the other positionings, reaching either edge is enough. Sizes the sources state are checked before downloading, and every downloaded file is measured as well. Turning this off lets small images through, upscaled.")
+        }
+    }
+
+    RowLayout {
+        spacing: Kirigami.Units.smallSpacing
+
+        QQC2.CheckBox {
+            id: matchScreenCheck
+            text: i18nd(root.domain, "Download no more than the screen can show")
+        }
+
+        Kirigami.ContextualHelpButton {
+            toolTipText: i18nd(root.domain,
+                "Off by default: the largest variant within the budget is downloaded, which is also the file “Save a Copy to Pictures” hands you. Turning this on asks each source for the smallest size that still covers your screen — on a 1920-wide screen a typical release is then 5 MB instead of 22 MB and takes a third of the CPU to decode. The wallpaper itself looks the same either way, since it is drawn at screen resolution regardless.")
         }
     }
 
@@ -272,7 +259,7 @@ Kirigami.FormLayout {
 
         Kirigami.ContextualHelpButton {
             toolTipText: i18nd(root.domain,
-                "Leaves out artist concepts, illustrations, infographics, diagrams, spectra and images with annotations drawn on them, keeping the actual telescope imagery. The sources name these plainly in the title — “(artist’s concept)”, “transmission spectrum”, “(annotated NIRCam image)” — which is what this matches on.")
+                "Leaves out artist concepts, illustrations, infographics, diagrams, spectra, compass and annotated versions, side-by-side comparisons and the odd press photo of the observatory itself, keeping the actual telescope imagery. science.nasa.gov classifies each picture itself; for ESA the title and caption are read — “(artist’s concept)”, “An illustration of…”, “transmission spectrum”.")
         }
     }
 
